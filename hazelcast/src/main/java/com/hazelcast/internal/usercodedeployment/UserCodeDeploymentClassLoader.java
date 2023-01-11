@@ -19,8 +19,11 @@ package com.hazelcast.internal.usercodedeployment;
 import com.hazelcast.logging.ILogger;
 import com.hazelcast.logging.Logger;
 
+import java.util.UUID;
+
 public class UserCodeDeploymentClassLoader extends ClassLoader {
 
+    public static final ThreadLocal<UUID> CLIENT_UUID = new ThreadLocal<>();
     private static final ILogger LOG = Logger.getLogger(UserCodeDeploymentClassLoader.class);
 
     private UserCodeDeploymentService userCodeDeploymentService;
@@ -63,4 +66,19 @@ public class UserCodeDeploymentClassLoader extends ClassLoader {
         }
         return clazz;
     }
+//
+//    @Override
+//    public Class<?> loadClass(String name) throws ClassNotFoundException {
+//        return this.loadClass(name, false);
+//    }
+//
+//    @Override
+//    protected Object getClassLoadingLock(String className) {
+//        return super.getClassLoadingLock(className);
+//    }
+//
+//    @Override
+//    protected Class<?> findClass(String name) throws ClassNotFoundException {
+//        return super.findClass(name);
+//    }
 }

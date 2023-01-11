@@ -18,6 +18,7 @@ package com.hazelcast.internal.usercodedeployment.impl.operation;
 
 import com.hazelcast.internal.usercodedeployment.UserCodeDeploymentService;
 import com.hazelcast.internal.usercodedeployment.impl.UserCodeDeploymentSerializerHook;
+import com.hazelcast.internal.util.UUIDSerializationUtil;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
 import com.hazelcast.nio.serialization.IdentifiedDataSerializable;
@@ -28,6 +29,7 @@ import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * Operation to distribute class definitions uploaded from client to cluster
@@ -35,9 +37,12 @@ import java.util.Map;
 public class DeployClassesOperation extends Operation implements IdentifiedDataSerializable {
 
     private List<Map.Entry<String, byte[]>> classDefinitions;
+    // new in 5.3
+    private UUID scopeUuid;
 
-    public DeployClassesOperation(List<Map.Entry<String, byte[]>> classDefinitions) {
+    public DeployClassesOperation(List<Map.Entry<String, byte[]>> classDefinitions, UUID scopeUuid) {
         this.classDefinitions = classDefinitions;
+        this.scopeUuid = scopeUuid;
     }
 
     public DeployClassesOperation() {
@@ -46,7 +51,7 @@ public class DeployClassesOperation extends Operation implements IdentifiedDataS
     @Override
     public void run() throws Exception {
         UserCodeDeploymentService service = getService();
-        service.defineClasses(classDefinitions);
+        service.defineClasses(classDefinitions, scopeUuid);
     }
 
     @Override
@@ -61,6 +66,8 @@ public class DeployClassesOperation extends Operation implements IdentifiedDataS
             out.writeString(classDefinition.getKey());
             out.writeByteArray(classDefinition.getValue());
         }
+        // TODO 5.3
+        UUIDSerializationUtil.writeUUID(out, scopeUuid);
     }
 
     @Override
@@ -72,6 +79,8 @@ public class DeployClassesOperation extends Operation implements IdentifiedDataS
             byte[] classDefinition = in.readByteArray();
             classDefinitions.add(new AbstractMap.SimpleEntry<String, byte[]>(className, classDefinition));
         }
+        // TODO 5.3
+        scopeUuid = UUIDSerializationUtil.readUUID(in);
     }
 
     @Override

@@ -16,6 +16,7 @@
 
 package com.hazelcast.internal.util;
 
+import javax.annotation.Nullable;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
@@ -28,7 +29,7 @@ public final class UUIDSerializationUtil {
     private UUIDSerializationUtil() {
     }
 
-    public static void writeUUID(DataOutput out, UUID uuid) throws IOException {
+    public static void writeUUID(DataOutput out, @Nullable UUID uuid) throws IOException {
         boolean isNull = uuid == null;
         out.writeBoolean(isNull);
         if (isNull) {
@@ -38,6 +39,7 @@ public final class UUIDSerializationUtil {
         out.writeLong(uuid.getLeastSignificantBits());
     }
 
+    @Nullable
     public static UUID readUUID(DataInput in) throws IOException {
         boolean isNull = in.readBoolean();
         if (isNull) {

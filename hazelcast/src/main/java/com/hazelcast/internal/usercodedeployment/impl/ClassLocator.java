@@ -29,6 +29,8 @@ import com.hazelcast.logging.ILogger;
 import com.hazelcast.spi.impl.NodeEngine;
 import com.hazelcast.spi.impl.operationservice.OperationService;
 
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import java.io.Closeable;
 import java.security.PrivilegedAction;
 import java.util.Arrays;
@@ -36,6 +38,8 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
@@ -55,8 +59,11 @@ import static java.security.AccessController.doPrivileged;
  */
 public final class ClassLocator {
     private static final Pattern CLASS_PATTERN = Pattern.compile("^(.*)\\$.*");
+    // "universal" (pre-5.2) class sources
     private final ConcurrentMap<String, ClassSource> classSourceMap;
     private final ConcurrentMap<String, ClassSource> clientClassSourceMap;
+    // scoped class sources
+    private final ConcurrentMap<UUID, ConcurrentMap<String, ClassSource>> scopedClassSourceMap;
     private final ClassLoader parent;
     private final Filter<String> classNameFilter;
     private final Filter<Member> memberFilter;
@@ -67,10 +74,12 @@ public final class ClassLocator {
 
     public ClassLocator(ConcurrentMap<String, ClassSource> classSourceMap,
                         ConcurrentMap<String, ClassSource> clientClassSourceMap,
+                        ConcurrentMap<UUID, ConcurrentMap<String, ClassSource>> scopedClassSourceMap,
                         ClassLoader parent, Filter<String> classNameFilter, Filter<Member> memberFilter,
                         UserCodeDeploymentConfig.ClassCacheMode classCacheMode, NodeEngine nodeEngine) {
         this.classSourceMap = classSourceMap;
         this.clientClassSourceMap = clientClassSourceMap;
+        this.scopedClassSourceMap = scopedClassSourceMap;
         this.parent = parent;
         this.classNameFilter = classNameFilter;
         this.memberFilter = memberFilter;
@@ -98,13 +107,45 @@ public final class ClassLocator {
         return tryToGetClassFromRemote(name);
     }
 
-    public void defineClassesFromClient(List<Map.Entry<String, byte[]>> bundledClassDefinitions) {
+    public synchronized void clearClassesFromClient() {
+        // todo synchronization
+        clientClassSourceMap.clear();
+    }
+
+    public void defineClassesFromClient(List<Map.Entry<String, byte[]>> bundledClassDefinitions,
+                                        @Nullable UUID scopeUuid) {
         Map<String, byte[]> bundledClassDefMap = new HashMap<>();
         for (Map.Entry<String, byte[]> bundledClassDefinition : bundledClassDefinitions) {
             bundledClassDefMap.put(bundledClassDefinition.getKey(), bundledClassDefinition.getValue());
         }
-        for (Map.Entry<String, byte[]> bundledClassDefinition : bundledClassDefinitions) {
-            defineClassFromClient(bundledClassDefinition.getKey(), bundledClassDefinition.getValue(), bundledClassDefMap);
+        defineClassAndBundleFromClient(bundledClassDefMap, scopeUuid);
+    }
+
+    public synchronized void defineClassAndBundleFromClient(Map<String, byte[]> bundledClassDefinitions,
+                                                            @Nullable UUID scopeUuid) {
+        ConcurrentMap<String, ClassSource> classSourceMap;
+        if (scopeUuid != null) {
+            classSourceMap = scopedClassSourceMap.computeIfAbsent(scopeUuid,
+                    uuid -> new ConcurrentHashMap<>());
+            logger.info("Scoped client classes Uuid: " + scopeUuid + " classSourceMap: " + classSourceMap.keySet());
+            logger.info("Scoped classes: " + scopedClassSourceMap);
+        } else {
+            classSourceMap = clientClassSourceMap;
+        }
+        // todo synchronization
+        logger.info("bundledClassDefinitions: " + bundledClassDefinitions.keySet());
+        for (String className : bundledClassDefinitions.keySet()) {
+            if (classSourceMap.containsKey(className)) {
+                throw new IllegalStateException("Class " + className
+                        + " is already registered, cannot redefine class bundle.");
+            }
+        }
+        ClassSource classSource = doPrivileged((PrivilegedAction<ClassSource>) ()
+                -> new ClassSource(parent, ClassLocator.this, bundledClassDefinitions));
+        for (String className : bundledClassDefinitions.keySet()) {
+            String mainClassName = extractMainClassName(className);
+            classSource.define(mainClassName, bundledClassDefinitions.get(className));
+            classSourceMap.put(mainClassName, classSource);
         }
     }
 
@@ -183,30 +224,45 @@ public final class ClassLocator {
     private Class<?> tryToGetClassFromLocalCache(String name) {
         String mainClassDefinition = extractMainClassName(name);
         ClassSource classSource = classSourceMap.get(mainClassDefinition);
-        if (classSource != null) {
-            Class clazz = classSource.getClazz(name);
-            if (clazz != null) {
-                if (logger.isFineEnabled()) {
-                    logger.finest("Class " + name + " is already in local cache");
+        Class clazz = getClassFromClassSource(classSource, name);
+        if (clazz != null) return clazz;
+
+        UUID scopeId = UserCodeDeploymentClassLoader.CLIENT_UUID.get();
+        if (scopeId != null) {
+            ConcurrentMap<String, ClassSource> scopedClassSources = scopedClassSourceMap.get(scopeId);
+            if (scopedClassSources != null) {
+                classSource = scopedClassSources.get(mainClassDefinition);
+                clazz = getClassFromClassSource(classSource, name);
+                if (clazz != null) {
+                    return clazz;
                 }
-                return clazz;
             }
         }
 
         classSource = clientClassSourceMap.get(mainClassDefinition);
-        if (classSource != null) {
-            Class clazz = classSource.getClazz(name);
-            if (clazz != null) {
-                if (logger.isFineEnabled()) {
-                    logger.finest("Class " + name + " is already in local cache");
-                }
-                return clazz;
-            }
+        clazz = getClassFromClassSource(classSource, name);
+        if (clazz != null) {
+            return clazz;
         }
 
         classSource = ThreadLocalClassCache.getFromCache(mainClassDefinition);
         if (classSource != null) {
             return classSource.getClazz(name);
+        }
+        return null;
+    }
+
+    @Nullable
+    private Class getClassFromClassSource(@Nullable ClassSource classSource,
+                                          @Nonnull String name) {
+        if (classSource != null) {
+            Class clazz = classSource.getClazz(name);
+            if (clazz != null) {
+                if (logger.isFineEnabled()) {
+                    logger.finest("Class " + name + " is already in local cache");
+                }
+                return clazz;
+            }
         }
         return null;
     }
@@ -277,9 +333,23 @@ public final class ClassLocator {
     }
 
     public Class<?> findLoadedClass(String name) {
-        ClassSource classSource = classSourceMap.get(extractMainClassName(name));
+        String mainClassName = extractMainClassName(name);
+        ClassSource classSource = classSourceMap.get(mainClassName);
         if (classSource == null) {
-            return null;
+            UUID scopeId = UserCodeDeploymentClassLoader.CLIENT_UUID.get();
+            logger.info("findLoadedClass: " + scopeId);
+            if (scopeId != null) {
+                ConcurrentMap<String, ClassSource> scopedClassSources = scopedClassSourceMap.get(scopeId);
+                if (scopedClassSources != null) {
+                    classSource = scopedClassSources.get(mainClassName);
+                }
+            }
+            if (classSource == null) {
+                classSource = clientClassSourceMap.get(mainClassName);
+                if (classSource == null) {
+                    return null;
+                }
+            }
         }
         return classSource.getClazz(name);
     }

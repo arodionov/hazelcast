@@ -46,7 +46,7 @@ public class DeployClassesMessageTask extends AbstractMultiTargetMessageTask<Lis
 
     @Override
     public Operation get() {
-        return new DeployClassesOperation(parameters);
+        return new DeployClassesOperation(parameters, endpoint.getUuid());
     }
 
     @Override

@@ -24,6 +24,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentMap;
 
 import static com.hazelcast.internal.nio.IOUtil.toByteArray;
@@ -39,17 +40,21 @@ public final class ClassDataProvider {
     private final ClassLoader parent;
     private final ConcurrentMap<String, ClassSource> classSourceMap;
     private final ConcurrentMap<String, ClassSource> clientClassSourceMap;
+    private final ConcurrentMap<UUID, ConcurrentMap<String, ClassSource>> scopedClassSourceMap;
+
     private final ILogger logger;
 
     public ClassDataProvider(UserCodeDeploymentConfig.ProviderMode providerMode,
                              ClassLoader parent,
                              ConcurrentMap<String, ClassSource> classSourceMap,
                              ConcurrentMap<String, ClassSource> clientClassSourceMap,
+                             ConcurrentMap<UUID, ConcurrentMap<String, ClassSource>> scopedClassSourceMap,
                              ILogger logger) {
         this.providerMode = providerMode;
         this.parent = parent;
         this.classSourceMap = classSourceMap;
         this.clientClassSourceMap = clientClassSourceMap;
+        this.scopedClassSourceMap = scopedClassSourceMap;
         this.logger = logger;
     }
 

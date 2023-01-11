@@ -50,6 +50,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import static com.hazelcast.internal.usercodedeployment.UserCodeDeploymentClassLoader.CLIENT_UUID;
 import static com.hazelcast.internal.util.ExceptionUtil.peel;
 
 /**
@@ -145,13 +146,18 @@ public abstract class AbstractMessageTask<P> implements MessageTask, SecureReque
         if (validateNodeStartBeforeDecode()) {
             validateNodeStart();
         }
-        parameters = decodeClientMessage(clientMessage);
-        assert addressesDecodedWithTranslation() : formatWrongAddressInDecodedMessage();
-        Credentials credentials = endpoint.getCredentials();
-        interceptBefore(credentials);
-        checkPermissions(endpoint);
-        processMessage();
-        interceptAfter(credentials);
+        CLIENT_UUID.set(endpoint.getUuid());
+        try {
+            parameters = decodeClientMessage(clientMessage);
+            assert addressesDecodedWithTranslation() : formatWrongAddressInDecodedMessage();
+            Credentials credentials = endpoint.getCredentials();
+            interceptBefore(credentials);
+            checkPermissions(endpoint);
+            processMessage();
+            interceptAfter(credentials);
+        } finally {
+            CLIENT_UUID.remove();
+        }
     }
 
     /**

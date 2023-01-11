@@ -27,9 +27,11 @@ import com.hazelcast.internal.util.filter.Filter;
 import com.hazelcast.logging.ILogger;
 import com.hazelcast.spi.impl.NodeEngine;
 
+import javax.annotation.Nullable;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -57,19 +59,23 @@ public final class UserCodeDeploymentService implements ManagedService {
         ClassLoader parent = nodeEngine.getConfigClassLoader().getParent();
         Filter<String> classNameFilter = parseClassNameFilters(config);
         Filter<Member> memberFilter = parseMemberFilter(config.getProviderFilter());
-        ConcurrentMap<String, ClassSource> classMap = new ConcurrentHashMap<String, ClassSource>();
-        ConcurrentMap<String, ClassSource> clientClassMap = new ConcurrentHashMap<String, ClassSource>();
+        ConcurrentMap<String, ClassSource> classMap = new ConcurrentHashMap<>();
+        ConcurrentMap<String, ClassSource> clientClassMap = new ConcurrentHashMap<>();
+        ConcurrentMap<UUID, ConcurrentMap<String, ClassSource>> scopedClassMap = new ConcurrentHashMap<>();
 
         UserCodeDeploymentConfig.ProviderMode providerMode = config.getProviderMode();
         ILogger providerLogger = nodeEngine.getLogger(ClassDataProvider.class);
-        provider = new ClassDataProvider(providerMode, parent, classMap, clientClassMap, providerLogger);
+        provider = new ClassDataProvider(providerMode, parent,
+                classMap, clientClassMap, scopedClassMap, providerLogger);
 
         UserCodeDeploymentConfig.ClassCacheMode classCacheMode = config.getClassCacheMode();
-        locator = new ClassLocator(classMap, clientClassMap, parent, classNameFilter, memberFilter, classCacheMode, nodeEngine);
+        locator = new ClassLocator(classMap, clientClassMap, scopedClassMap,
+                parent, classNameFilter, memberFilter, classCacheMode, nodeEngine);
         enabled = config.isEnabled();
     }
 
-    public void defineClasses(List<Map.Entry<String, byte[]>> classDefinitions) {
+    public void defineClasses(List<Map.Entry<String, byte[]>> classDefinitions,
+                              @Nullable UUID scopeUuid) {
         if (!enabled) {
             throw new IllegalStateException("User Code Deployment is not enabled. "
                     + "To enable User Code Deployment, do one of the following:\n"
@@ -79,7 +85,11 @@ public final class UserCodeDeploymentService implements ManagedService {
                         "-Dhz.user-code-deployment.enabled=true",
                         "HZ_USERCODEDEPLOYMENT_ENABLED=true"));
         }
-        locator.defineClassesFromClient(classDefinitions);
+        locator.defineClassesFromClient(classDefinitions, scopeUuid);
+    }
+
+    public void clearClientClasses() {
+        locator.clearClassesFromClient();
     }
 
     // called by operations sent by other members

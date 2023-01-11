@@ -26,6 +26,7 @@ import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
 
 import java.util.Collections;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -76,10 +77,12 @@ public class ClassDataProviderTest {
     private ClassDataProvider createClassDataProvider(UserCodeDeploymentConfig.ProviderMode providerMode,
                                                       String className, ClassSource classSource, ClassLoader parent) {
         ILogger logger = mock(ILogger.class);
-        ConcurrentMap<String, ClassSource> classSourceMap = new ConcurrentHashMap<String, ClassSource>();
-        ConcurrentMap<String, ClassSource> clientClassSourceMap = new ConcurrentHashMap<String, ClassSource>();
+        ConcurrentMap<String, ClassSource> classSourceMap = new ConcurrentHashMap<>();
+        ConcurrentMap<String, ClassSource> clientClassSourceMap = new ConcurrentHashMap<>();
+        ConcurrentMap<UUID, ConcurrentMap<String, ClassSource>> scopedClassSourceMap = new ConcurrentHashMap<>();
         classSourceMap.put(className, classSource);
-        return new ClassDataProvider(providerMode, parent, classSourceMap, clientClassSourceMap, logger);
+        return new ClassDataProvider(providerMode, parent, classSourceMap,
+                clientClassSourceMap, scopedClassSourceMap, logger);
     }
 
     private static ClassSource newMockClassSource() {
